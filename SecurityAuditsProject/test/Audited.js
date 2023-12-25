@@ -2,58 +2,47 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("StorageVictimAudited", function () {
-    // Declare variables
+describe("StorageVictimAudited Tests", function () {
     let storageVictim;
-    let caller;
-    let callerAmount;
+    let testAccount;
+    let testAmount;
 
     beforeEach(async () => {
-        // Get the contract factory for StorageVictimAudited
-        const StorageVictimAudited = await ethers.getContractFactory(
-            "StorageVictimAudited"
-        );
-
         // Deploy the StorageVictimAudited contract
-        storageVictim = await StorageVictimAudited.deploy();
-
-        // Wait for the contract to be deployed
+        const StorageVictim = await ethers.getContractFactory("StorageVictimAudited");
+        storageVictim = await StorageVictim.deploy();
         await storageVictim.deployed();
 
-        // Get the signer
-        [caller] = await ethers.getSigners();
-
-        // Set an initial amount to store
-        callerAmount = 100;
+        // Setup test account and initial amount
+        [testAccount] = await ethers.getSigners();
+        testAmount = 100;
     });
 
-    it("should store and retrieve the amount correctly", async function () {
+    it("should correctly store and retrieve the amount", async function () {
         // Store the initial amount
-        await storageVictim.store(callerAmount);
+        await storageVictim.store(testAmount);
 
         // Retrieve the stored amount
-        const [user, _amount] = await storageVictim.getStore();
+        const [retrievedUser, retrievedAmount] = await storageVictim.getStore();
 
-        // Ensure the retrieved values are correct
-        expect(user).to.equal(caller.address);
-        expect(_amount).to.equal(callerAmount);
+        // Verify the retrieved values
+        expect(retrievedUser).to.equal(testAccount.address);
+        expect(retrievedAmount).to.equal(testAmount);
     });
 
-    it("should update the stored amount correctly", async function () {
+    it("should correctly update and retrieve the stored amount", async function () {
         // Store the initial amount
-        await storageVictim.store(callerAmount);
+        await storageVictim.store(testAmount);
 
-        // Update the amount to store
-        callerAmount = 200;
-
-        // Update the stored amount
-        await storageVictim.store(callerAmount);
+        // Update and store a new amount
+        const updatedAmount = 200;
+        await storageVictim.store(updatedAmount);
 
         // Retrieve the updated amount
-        const [user, amount] = await storageVictim.getStore();
+        const [retrievedUser, retrievedAmount] = await storageVictim.getStore();
 
-        // Ensure the retrieved values are correct
-        expect(user).to.equal(caller.address);
-        expect(amount).to.equal(callerAmount);
+        // Verify the retrieved values
+        expect(retrievedUser).to.equal(testAccount.address);
+        expect(retrievedAmount).to.equal(updatedAmount);
     });
 });
