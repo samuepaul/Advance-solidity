@@ -81,12 +81,10 @@ Note: Make sure to include the required OpenZeppelin contracts, specifically Cre
 
 Feel free to customize and modify this contract to suit your specific use case.
 
-## License
-
-This contract is licensed under the GPL-3.0 License. For details, please see the [SPDX-License-Identifier](https://spdx.org/licenses/GPL-3.0.html) at the beginning of the contract.
-
-
-
 ## Author
 
-[Samaila Anthony Malima](https://www.github.com/samailamalima)
+[Samuel Paul](https://github.com/samuepaul)
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
