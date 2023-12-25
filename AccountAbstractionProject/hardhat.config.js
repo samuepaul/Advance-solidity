@@ -4,7 +4,7 @@ require("dotenv").config();
 /** @type import('hardhat/config').HardhatUserConfig */
 const { API_URL, PRIVATE_KEY , API_KEY} = process.env;
 module.exports = {
-  solidity: "0.8.17",
+  solidity: "0.8.20",
 
   mocha: {
     timeout: 40000,
