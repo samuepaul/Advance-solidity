@@ -1,130 +1,94 @@
 // SPDX-License-Identifier: MIT
-
-pragma solidity 0.8.19;
+pragma solidity ^0.8.20;
 
 contract WalletInsurance {
-    // Address of the contract owner
     address public owner;
-
-    // Amount to be insured
     uint256 public insuredAmount;
+    uint256 public tokensIssued;
+    bool public isInsured;
+    uint256 public insuranceExpiry;
 
-    // Token amount
-    uint256 public token;
+    uint256 private constant BASIC_INSURANCE_DURATION = 90 days;
+    uint256 private constant BASIC_POLICY_RATE = 4;
+    uint256 private constant BASIC_POLICY = 1e9; // 1,000,000,000
 
-    // Flag indicating if the contract is insured
-    bool public insured;
+    uint256 private constant STANDARD_INSURANCE_DURATION = 180 days;
+    uint256 private constant STANDARD_POLICY_RATE = 9;
+    uint256 private constant STANDARD_POLICY = 1e8; // 100,000,000
 
-    // Duration for basic insurance
-    uint256 constant private BasicInsuranceDuration = 90 days;
+    mapping(address => uint256) public balances;
+    mapping(address => uint256) public tokenBalances;
 
-    // Policy for basic insurance
-    uint256 constant private BasicPolicy = 1e9;
-
-    // Duration for standard insurance
-    uint256 constant private StandardInsuranceDuration = 180 days;
-
-    // Policy for standard insurance
-    uint256 constant private StandardPolicy = 1e8;
-
-    // Duration of insurance coverage
-    uint256 public insuranceDuration;
-
-    // Mapping to store the balance of each address
-    mapping(address => uint256) public balance;
-
-    // Mapping to store the token balance of each address
-    mapping(address => uint256) public tokenBalance;
-
-    // Event emitted when a payment is received
     event PaymentReceived(address indexed payer, uint256 amount);
-
-    // Event emitted when an insurance claim is made
     event Claimed(address indexed claimant, uint256 amount);
 
     constructor(uint256 _insuredAmount) {
-        // Set the contract owner as the transaction sender
         owner = msg.sender;
-        // Set the insured amount
         insuredAmount = _insuredAmount;
     }
 
-    // Function for paying insurance
-    function payInsurance() external payable {
-        // Check if the caller is already insured
-        require(!insured, "You are already insured.");
-
-        // Check if the amount sent is sufficient
-        require(msg.value >= insuredAmount, "The amount provided is not valid.");
-
-        // Check if the payment is allowed at this time
-        require(block.timestamp > insuranceDuration, "You are unable to make a payment at this time.");
-
-        // Add the payment amount to the owner's balance
-        balance[owner] += msg.value;
-
-        // Calculate insurance duration and token based on the amount paid
-        if (msg.value < 1 ether) {
-            // Set the insurance duration for basic insurance
-            insuranceDuration = block.timestamp + BasicInsuranceDuration;
-
-            // Calculate the token amount for basic insurance
-            token = (msg.value * 4 * insuranceDuration) / BasicPolicy;
-        } else if (msg.value >= 1 ether) {
-            // Set the insurance duration for standard insurance
-            insuranceDuration = block.timestamp + StandardInsuranceDuration;
-
-            // Calculate the token amount for standard insurance
-            token = (msg.value * 9 * insuranceDuration) / StandardPolicy;
-        }
-
-        // Set the insured flag to true
-        insured = true;
-
-        // Emit the payment received event
-        emit PaymentReceived(msg.sender, msg.value);
-    }
-
-    // Modifier to restrict access to only the owner of the contract
     modifier onlyOwner() {
-        require(msg.sender == owner, "This action can only be performed by the owner of the contract.");
+        require(msg.sender == owner, "Only the owner can perform this action.");
         _;
     }
 
-    // Function for claiming insurance
-    function claimInsurance() external payable onlyOwner() {
-        // Check if the caller has insurance coverage
-        require(insured, "You do not have insurance coverage.");
+    function payInsurance() external payable {
+        require(!isInsured, "Already insured.");
+        require(msg.value >= insuredAmount, "Insufficient payment amount.");
+        require(block.timestamp > insuranceExpiry, "Insurance payment window closed.");
 
-        // Check if the insurance has expired
-        require(block.timestamp > insuranceDuration, "Your insurance is still valid and has not expired.");
+        balances[owner] += msg.value;
+        setInsuranceTerms(msg.value);
 
-        // Check if the insurance payment has been made
-        require(balance[owner] != 0, "The insurance payment has not been made.");
-
-        // Set the insured flag to false
-        insured = false;
-
-        // Add the token amount to the owner's token balance
-        tokenBalance[owner] += token;
-
-        // Send the contract's balance to the owner
-        (bool sent, ) = (owner).call{value: address(this).balance}("");
-
-        // Check if the transfer of Ether was successful
-        require(sent, "The attempt to send Ether has failed.");
-
-        // Emit the insurance claimed event
-        emit Claimed(msg.sender, address(this).balance);
+        emit PaymentReceived(msg.sender, msg.value);
     }
 
-    // Function to get the balance of the caller
+    function claimInsurance() external onlyOwner {
+        require(isInsured, "Not insured.");
+        require(block.timestamp > insuranceExpiry, "Insurance still valid.");
+        require(balances[owner] > 0, "No payment made.");
+
+        isInsured = false;
+        tokenBalances[owner] += tokensIssued;
+        sendEther(owner, address(this).balance);
+
+        emit Claimed(owner, address(this).balance);
+    }
+
     function getBalance() external view returns (uint256) {
-        return balance[msg.sender];
+        return balances[msg.sender];
     }
 
-    // Function to get the token balance of the caller
     function getTokenBalance() external view returns (uint256) {
-        return tokenBalance[msg.sender];
+        return tokenBalances[msg.sender];
+    }
+
+    function setInsuranceTerms(uint256 payment) private {
+        uint256 rate;
+        uint256 policyValue;
+        uint256 duration;
+
+        if (payment < 1 ether) {
+            rate = BASIC_POLICY_RATE;
+            policyValue = BASIC_POLICY;
+            duration = BASIC_INSURANCE_DURATION;
+        } else {
+            rate = STANDARD_POLICY_RATE;
+            policyValue = STANDARD_POLICY;
+            duration = STANDARD_INSURANCE_DURATION;
+        }
+
+        insuranceExpiry = block.timestamp + duration;
+        tokensIssued = calculateTokens(payment, rate, policyValue, duration);
+        isInsured = true;
+    }
+
+    function calculateTokens(uint256 amount, uint256 rate, uint256 policy, uint256 duration) private pure returns (uint256) {
+        return (amount * rate * duration) / policy;
+    }
+
+    function sendEther(address to, uint256 amount) private {
+        (bool sent, ) = to.call{value: amount}("");
+        require(sent, "Ether transfer failed.");
     }
 }

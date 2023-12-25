@@ -1,155 +1,99 @@
 // SPDX-License-Identifier: MIT
-
-pragma solidity 0.8.19;
+pragma solidity ^0.8.20;
 
 contract CollateralProtection {
-    // Address of the contract owner
+    // Contract owner's address
     address public owner;
 
-    // Threshold for collateral
-    uint256 public collateralThreshold;
+    // Constants for loan plans
+    uint256 private constant BASIC_PLAN_AMOUNT = 1 ether;
+    uint256 private constant BASIC_PLAN_DURATION = 90 days;
+    uint256 private constant PREMIUM_PLAN_AMOUNT = 2 ether;
+    uint256 private constant PREMIUM_PLAN_DURATION = 180 days;
 
     struct LoanPolicy {
-        // Amount of the loan
-        uint256 loanAmount;
-
-        // Threshold for collateral associated with the loan
+        uint256 amount;
         uint256 collateralThreshold;
-
-        // Duration of the loan
-        uint256 loanDuration;
-
-        // Amount owed for the loan
-        uint256 loanOwed;
-
-        // Wallet balance associated with the loan
-        uint256 wallet;
-
-        // Flag indicating if the loan has been paid
-        bool paid;
+        uint256 duration;
+        uint256 owed;
+        uint256 walletBalance;
+        bool isPaid;
     }
 
-    // Mapping to track collateral amounts for each borrower
-    mapping(address => uint256) public loanCollateral;
+    // Mapping of borrower's collateral amounts
+    mapping(address => uint256) public collaterals;
+    // Mapping of borrower's loan policies
+    mapping(address => LoanPolicy) public loans;
 
-    // Mapping to track loan policies for each borrower
-    mapping(address => LoanPolicy) public loan;
-
-    // Event emitted when a loan is created
-    event LoanCreated(address indexed borrower, uint256 loanAmount, uint256 collateralAmount);
-
-    // Event emitted when collateral is returned
-    event CollateralReturned(address indexed borrower, uint256 collateralAmount);
+    // Events
+    event LoanCreated(address indexed borrower, uint256 amount, uint256 collateral);
+    event CollateralReturned(address indexed borrower, uint256 amount);
 
     constructor() {
-        owner = tx.origin; // Set the contract owner to the deployer's address
+        owner = msg.sender; // Setting the contract owner
     }
 
-    // Constants for different loan plans and durations
-
-    // Amount for the basic loan plan
-    uint256 private constant BasicPlan = 1 ether;
-
-    // Duration for the basic loan plan
-    uint256 private constant BasicPlanDuration = 90 days;
-
-    // Amount for the premium loan plan
-    uint256 private constant PremiumPlan = 2 ether;
-
-    // Duration for the premium loan plan
-    uint256 private constant PremiumPlanDuration = 180 days;
-
-    // Only owner modifier
+    // Modifier to restrict access to the owner only
     modifier onlyOwner() {
-        // Only the contract owner can perform this action
-        require(msg.sender == owner, "This action can only be performed by the owner of the contract.");
+        require(msg.sender == owner, "Only the owner can perform this action.");
         _;
     }
 
     // Function to create a loan
-    function createLoan(uint256 loanAmount, uint256 collateralAmount) external onlyOwner {
-        // Check if the loan amount and collateral amount are greater than zero
-        require(loanAmount > 0, "The loan amount should be higher than zero.");
-        require(collateralAmount > 0, "The collateral amount needs to exceed zero.");
+    function createLoan(uint256 amount, uint256 collateral) external onlyOwner {
+        require(amount > 0, "Loan amount must be greater than zero.");
+        require(collateral > 0, "Collateral must be greater than zero.");
+        require(loans[msg.sender].amount == 0, "Loan already exists for this borrower.");
 
-        // Check if a loan with the same details already exists for the sender
-        require(loan[msg.sender].loanAmount == 0, "A loan with the same details already exists.");
+        LoanPolicy memory newLoan;
+        newLoan.amount = amount;
+        newLoan.collateralThreshold = collateral;
+        newLoan.isPaid = false;
+        newLoan.walletBalance = 0;
 
-        if (loanAmount > BasicPlan) {
-            // If the loan amount is greater than the BasicPlan value, create a premium loan with a 20% interest rate
-            loan[owner] = LoanPolicy(
-                loanAmount,
-                collateralAmount,
-                block.timestamp + PremiumPlanDuration,
-                loanAmount + (loanAmount * 20) / 100,
-                0,
-                false
-            );
-        } else if (loanAmount <= BasicPlan) {
-            // If the loan amount is less than or equal to the BasicPlan value, create a basic loan with a 10% interest rate
-            loan[owner] = LoanPolicy(
-                loanAmount,
-                collateralAmount,
-                block.timestamp + BasicPlanDuration,
-                loanAmount + (loanAmount * 10) / 100,
-                0,
-                false
-            );
+        if (amount > BASIC_PLAN_AMOUNT) {
+            newLoan.duration = block.timestamp + PREMIUM_PLAN_DURATION;
+            newLoan.owed = amount + (amount * 20) / 100; // 20% interest for premium plan
+        } else {
+            newLoan.duration = block.timestamp + BASIC_PLAN_DURATION;
+            newLoan.owed = amount + (amount * 10) / 100; // 10% interest for basic plan
         }
 
-        // Store the collateral amount for the loan
-        loanCollateral[msg.sender] = collateralAmount;
+        loans[msg.sender] = newLoan;
+        collaterals[msg.sender] = collateral;
 
-        // Emit a LoanCreated event with the details of the loan created
-        emit LoanCreated(msg.sender, loanAmount, collateralAmount);
+        emit LoanCreated(msg.sender, amount, collateral);
     }
 
     // Function to collect the loan
     function collectLoan() external payable {
-        // Check if the owner has collateral
-        require(loanCollateral[owner] != 0, "There is no collateral associated with your account.");
+        LoanPolicy storage loan = loans[owner];
+        require(collaterals[owner] > 0, "No collateral associated with the owner.");
+        require(loan.walletBalance == 0, "Wallet balance must be zero.");
+        require(loan.collateralThreshold >= loan.amount, "Insufficient collateral.");
+        require(!loan.isPaid, "Loan is already paid.");
 
-        // Check if the owner's wallet balance is zero
-        require(loan[owner].wallet == 0, "The balance in your wallet must be zero.");
+        (bool sent,) = owner.call{value: loan.amount}("");
+        require(sent, "Failed to send Ether.");
 
-        // Check if the owner's collateral is sufficient based on the loan amount
-        require(loan[owner].collateralThreshold >= loan[owner].loanAmount, "The amount of collateral you have is insufficient.");
-
-        // Check if the loan has not been paid yet
-        require(!loan[owner].paid, "The loan has not been paid out yet.");
-
-        // Send the loan amount to the owner's address
-        (bool sent,) = (owner).call{value: loan[owner].loanAmount}("");
-        require(sent, "The attempt to send Ether has failed.");
-
-        // Add the loan amount to the owner's wallet balance
-        loan[owner].wallet += loan[owner].loanAmount;
+        loan.walletBalance += loan.amount;
     }
 
     // Function to pay the loan
     function payLoan() external payable {
-        // Check if there is an existing loan available to pay
-        require(loan[owner].loanOwed > 0, "There is no loan available to be paid.");
+        LoanPolicy storage loan = loans[owner];
+        require(loan.owed > 0, "No loan available to pay.");
+        require(msg.value >= loan.owed, "Insufficient payment amount.");
+        require(!loan.isPaid, "Loan is already paid.");
 
-        // Check if the payment amount is sufficient to cover the loan
-        require(msg.value >= loan[owner].loanOwed, "The provided amount is not sufficient.");
-
-        // Check if the loan has not been paid yet
-        require(!loan[owner].paid, "The loan has not been paid out yet.");
-
-        // Transfer the payment to the contract
         payable(address(this)).transfer(msg.value);
 
-        // Deduct the payment from the loan amount owed
-        loan[owner].loanOwed -= msg.value;
+        loan.owed -= msg.value;
+        collaterals[msg.sender] = 0;
 
-        // Claim collateral by setting collateral amount to zero
-        loanCollateral[msg.sender] = 0;
-
-        // Emit an event to indicate that collateral has been returned
         emit CollateralReturned(owner, msg.value);
     }
 
-    // Fallback function to receive Ether
-    receive() payable external {}
+    // Fallback function for receiving Ether
+    receive() external payable {}
 }
